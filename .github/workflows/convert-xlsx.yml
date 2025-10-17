@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
   push:
     paths:
-      - "data/**/*.xlsx"
+      - "**/*.xlsx"   # ✅ data 폴더 제한 제거 → 레포 내 모든 엑셀 감시
 
 jobs:
   convert:
@@ -14,27 +14,39 @@ jobs:
         with:
           python-version: "3.11"
       - run: pip install pandas pyarrow openpyxl
-      - name: Convert all .xlsx under data/
+      - name: Convert all .xlsx in repo
         run: |
           python - << 'PY'
           import os, json, pandas as pd, pyarrow as pa, pyarrow.parquet as pq
           from pathlib import Path
-          ROOT = Path("data")
+          ROOT = Path(".")  # ✅ 현재 레포 전체 탐색
           OUT = Path("converted")
           OUT.mkdir(exist_ok=True, parents=True)
           manifest = []
 
           for xlsx in ROOT.rglob("*.xlsx"):
-              book = pd.read_excel(xlsx, sheet_name=None, dtype=str)
-              for sname, df in book.items():
-                  safe = "".join(c if c.isalnum() or c in "-_." else "_" for c in sname)[:80]
-                  base = OUT / f"{xlsx.stem}__{safe}"
-                  csv = base.with_suffix(".csv")
-                  df.to_csv(csv, index=False, encoding="utf-8-sig")
-                  pq.write_table(pa.Table.from_pandas(df), base.with_suffix(".parquet"), compression="snappy")
-                  manifest.append({"xlsx": str(xlsx), "sheet": sname, "csv": str(csv), "parquet": str(base.with_suffix(".parquet"))})
+              # .github 폴더나 Actions 파일은 제외
+              if ".github" in str(xlsx):
+                  continue
+              try:
+                  book = pd.read_excel(xlsx, sheet_name=None, dtype=str)
+                  for sname, df in book.items():
+                      safe = "".join(c if c.isalnum() or c in "-_." else "_" for c in sname)[:80]
+                      base = OUT / f"{xlsx.stem}__{safe}"
+                      csv_path = base.with_suffix(".csv")
+                      df.to_csv(csv_path, index=False, encoding="utf-8-sig")
+                      pq.write_table(pa.Table.from_pandas(df), base.with_suffix(".parquet"), compression="snappy")
+                      manifest.append({
+                          "xlsx": str(xlsx),
+                          "sheet": sname,
+                          "csv": str(csv_path),
+                          "parquet": str(base.with_suffix(".parquet"))
+                      })
+              except Exception as e:
+                  print("⚠️ 변환 실패:", xlsx, e)
+
           (OUT / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
-          print("변환 완료:", len(manifest), "sheet")
+          print("변환 완료:", len(manifest), "시트 변환됨")
           PY
       - name: Zip outputs
         run: |
@@ -44,4 +56,3 @@ jobs:
         with:
           name: converted_csv_parquet
           path: converted_csv_parquet.zip
-
