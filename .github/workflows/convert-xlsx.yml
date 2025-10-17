@@ -25,7 +25,6 @@ jobs:
           manifest = []
 
           for xlsx in ROOT.rglob("*.xlsx"):
-              # .github 폴더나 Actions 파일은 제외
               if ".github" in str(xlsx):
                   continue
               try:
@@ -48,10 +47,13 @@ jobs:
           (OUT / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
           print("변환 완료:", len(manifest), "시트 변환됨")
           PY
-      - name: Zip outputs
+
+      # ✅ 압축률을 최고(-9)로 변경
+      - name: Zip outputs (high compression)
         run: |
           cd converted
-          zip -r ../converted_csv_parquet.zip .
+          zip -9 -r ../converted_csv_parquet.zip .  # ✅ 최고 압축률 (-9)
+
       - uses: actions/upload-artifact@v4
         with:
           name: converted_csv_parquet
