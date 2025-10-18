@@ -1,28 +1,40 @@
-name: Convert XLSX to CSV (Keep Formulas, Compressed)
+name: Convert XLSX to CSV (Keep Formulas, UTF-8, Compressed)
+
 on:
   workflow_dispatch:
   push:
     paths:
-      - "**/*.xlsx"   # ✅ 레포 내 모든 엑셀 감시
+      - "**/*.xlsx"
 
 jobs:
   convert:
     runs-on: ubuntu-latest
+    env:
+      PYTHONUTF8: "1"
+      LANG: "ko_KR.UTF-8"
+      LC_ALL: "ko_KR.UTF-8"
+
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+      - run: |
+          sudo apt-get update -y
+          sudo apt-get install -y locales
+          sudo locale-gen ko_KR.UTF-8
+          export LANG=ko_KR.UTF-8
+          export LC_ALL=ko_KR.UTF-8
       - run: pip install openpyxl
 
-      - name: Convert all .xlsx in repo (Keep formulas as text)
+      - name: Convert all .xlsx in repo (Keep formulas, UTF-8)
         run: |
           python - << 'PY'
           import os, csv, json
           from pathlib import Path
           from openpyxl import load_workbook
 
-          ROOT = Path(".")   # ✅ 전체 레포 탐색
+          ROOT = Path(".")
           OUT = Path("converted_csv_formulas")
           OUT.mkdir(exist_ok=True, parents=True)
           manifest = []
@@ -31,7 +43,7 @@ jobs:
               if ".github" in str(xlsx):
                   continue
               try:
-                  wb = load_workbook(xlsx, data_only=False)  # ⚡ data_only=False → 수식 유지
+                  wb = load_workbook(xlsx, data_only=False)
                   for ws in wb.worksheets:
                       safe = "".join(c if c.isalnum() or c in "-_." else "_" for c in ws.title)[:80]
                       out_csv = OUT / f"{xlsx.stem}__{safe}.csv"
@@ -41,7 +53,7 @@ jobs:
                               vals = []
                               for cell in row:
                                   if cell.data_type == "f" or (isinstance(cell.value, str) and cell.value.startswith("=")):
-                                      vals.append(cell.value)  # ✅ 수식 그대로 보존
+                                      vals.append(cell.value)
                                   else:
                                       vals.append(cell.value)
                               writer.writerow(vals)
@@ -54,21 +66,19 @@ jobs:
               except Exception as e:
                   print("⚠️ 변환 실패:", xlsx, e)
 
-          # manifest 기록
           (OUT / "manifest.json").write_text(
               json.dumps(manifest, ensure_ascii=False, indent=2),
               encoding="utf-8"
           )
-          print(f"총 {len(manifest)} 시트 변환 완료 (수식 유지 CSV)")
+          print(f"총 {len(manifest)} 시트 변환 완료 (수식 유지, UTF-8)")
           PY
 
-      # ✅ 고압축 ZIP (수식 유지 CSV)
-      - name: Zip outputs (High compression)
+      - name: Zip outputs (UTF-8 names, high compression)
         run: |
           cd converted_csv_formulas
-          zip -9 -r ../converted_csv_formulas.zip .
+          zip -9 -r ../converted_csv_formulas_utf8.zip . -i '*.csv' '*.json' --no-dir-entries
 
       - uses: actions/upload-artifact@v4
         with:
-          name: converted_csv_formulas
-          path: converted_csv_formulas.zip
+          name: converted_csv_formulas_utf8
+          path: converted_csv_formulas_utf8.zip
