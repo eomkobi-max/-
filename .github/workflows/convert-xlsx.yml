@@ -1,4 +1,4 @@
-name: Convert XLSX to Parquet (High Compression)
+name: Convert XLSX to CSV (Keep Formulas, Compressed)
 on:
   workflow_dispatch:
   push:
@@ -13,15 +13,17 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - run: pip install pandas pyarrow openpyxl
-      - name: Convert all .xlsx in repo (Parquet only)
+      - run: pip install openpyxl
+
+      - name: Convert all .xlsx in repo (Keep formulas as text)
         run: |
           python - << 'PY'
-          import os, json, pandas as pd, pyarrow as pa, pyarrow.parquet as pq
+          import os, csv, json
           from pathlib import Path
+          from openpyxl import load_workbook
 
-          ROOT = Path(".")  # ✅ 전체 repo 탐색
-          OUT = Path("converted")
+          ROOT = Path(".")   # ✅ 전체 레포 탐색
+          OUT = Path("converted_csv_formulas")
           OUT.mkdir(exist_ok=True, parents=True)
           manifest = []
 
@@ -29,44 +31,44 @@ jobs:
               if ".github" in str(xlsx):
                   continue
               try:
-                  book = pd.read_excel(xlsx, sheet_name=None, dtype=str)
-                  for sname, df in book.items():
-                      # 안전한 시트명 생성
-                      safe = "".join(c if c.isalnum() or c in "-_." else "_" for c in sname)[:80]
-                      base = OUT / f"{xlsx.stem}__{safe}"
-
-                      # ✅ CSV 저장 제거
-                      # df.to_csv(base.with_suffix(".csv"), index=False, encoding="utf-8-sig")
-
-                      # ✅ Parquet만 저장 (Snappy 압축)
-                      pq.write_table(
-                          pa.Table.from_pandas(df),
-                          base.with_suffix(".parquet"),
-                          compression="snappy"
-                      )
-
+                  wb = load_workbook(xlsx, data_only=False)  # ⚡ data_only=False → 수식 유지
+                  for ws in wb.worksheets:
+                      safe = "".join(c if c.isalnum() or c in "-_." else "_" for c in ws.title)[:80]
+                      out_csv = OUT / f"{xlsx.stem}__{safe}.csv"
+                      with open(out_csv, "w", newline="", encoding="utf-8-sig") as f:
+                          writer = csv.writer(f)
+                          for row in ws.iter_rows(values_only=False):
+                              vals = []
+                              for cell in row:
+                                  if cell.data_type == "f" or (isinstance(cell.value, str) and cell.value.startswith("=")):
+                                      vals.append(cell.value)  # ✅ 수식 그대로 보존
+                                  else:
+                                      vals.append(cell.value)
+                              writer.writerow(vals)
                       manifest.append({
                           "xlsx": str(xlsx),
-                          "sheet": sname,
-                          "parquet": str(base.with_suffix(".parquet"))
+                          "sheet": ws.title,
+                          "csv": str(out_csv)
                       })
+                  print(f"✅ {xlsx.name}: {len(wb.sheetnames)} sheets converted")
               except Exception as e:
                   print("⚠️ 변환 실패:", xlsx, e)
 
+          # manifest 기록
           (OUT / "manifest.json").write_text(
               json.dumps(manifest, ensure_ascii=False, indent=2),
               encoding="utf-8"
           )
-          print("변환 완료:", len(manifest), "시트 변환됨 (Parquet only)")
+          print(f"총 {len(manifest)} 시트 변환 완료 (수식 유지 CSV)")
           PY
 
-      # ✅ 최고 압축률 (-9)
-      - name: Zip outputs (high compression, Parquet only)
+      # ✅ 고압축 ZIP (수식 유지 CSV)
+      - name: Zip outputs (High compression)
         run: |
-          cd converted
-          zip -9 -r ../converted_parquet_only.zip .
+          cd converted_csv_formulas
+          zip -9 -r ../converted_csv_formulas.zip .
 
       - uses: actions/upload-artifact@v4
         with:
-          name: converted_parquet_only
-          path: converted_parquet_only.zip
+          name: converted_csv_formulas
+          path: converted_csv_formulas.zip
